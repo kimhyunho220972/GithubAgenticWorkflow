@@ -1,0 +1,97 @@
+name: Synapse Pipeline Error Fix
+
+on:
+  repository_dispatch:
+    types:
+      - synapse-pipeline-failure
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  handle-synapse-error:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract error payload
+        id: payload
+        env:
+          ERROR_MESSAGE: ${{ github.event.client_payload.error_message }}
+          PIPELINE_NAME: ${{ github.event.client_payload.pipeline_name }}
+          ACTIVITY_NAME: ${{ github.event.client_payload.activity_name }}
+          TRIGGER_NAME: ${{ github.event.client_payload.trigger_name }}
+          WORKSPACE_NAME: ${{ github.event.client_payload.workspace_name }}
+          RECENT_CHANGES: ${{ github.event.client_payload.recent_changes }}
+        run: |
+          echo "error_message=${ERROR_MESSAGE}" >> "$GITHUB_OUTPUT"
+          echo "pipeline_name=${PIPELINE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "activity_name=${ACTIVITY_NAME}" >> "$GITHUB_OUTPUT"
+          echo "trigger_name=${TRIGGER_NAME}" >> "$GITHUB_OUTPUT"
+          echo "workspace_name=${WORKSPACE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "recent_changes=${RECENT_CHANGES}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Synapse error issue and assign to Copilot
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const errorMessage   = process.env.ERROR_MESSAGE   || '(not provided)';
+            const pipelineName   = process.env.PIPELINE_NAME   || '(not provided)';
+            const activityName   = process.env.ACTIVITY_NAME   || '(not provided)';
+            const triggerName    = process.env.TRIGGER_NAME    || '(not provided)';
+            const workspaceName  = process.env.WORKSPACE_NAME  || '(not provided)';
+            const recentChanges  = process.env.RECENT_CHANGES  || '(not provided)';
+
+            const body = [
+              '## Synapse Pipeline Failure – Automated Fix Request',
+              '',
+              'An Azure Synapse Pipeline failure has been detected. Please use the',
+              '`synapse-error-coordinator` agent (`.github/agents/synapse-error-coordinator.agent.md`)',
+              'to analyze the error, identify the root cause, and propose a fix.',
+              '',
+              '### Error Details',
+              '',
+              `| Field | Value |`,
+              `|---|---|`,
+              `| **Error message** | ${errorMessage} |`,
+              `| **Pipeline name** | ${pipelineName} |`,
+              `| **Activity name** | ${activityName} |`,
+              `| **Trigger name**  | ${triggerName} |`,
+              `| **Workspace**     | ${workspaceName} |`,
+              `| **Recent changes**| ${recentChanges} |`,
+              '',
+              '### Instructions for the Coordinator Agent',
+              '',
+              '1. Use the `synapse-error-coordinator` agent defined in',
+              '   `.github/agents/synapse-error-coordinator.agent.md` as the top-level orchestrator.',
+              '2. Delegate web research to the `synapse-error-analyzer` agent.',
+              '3. Validate the proposed fix with the `synapse-solution-validator` agent.',
+              '4. Only accept solutions where the validator returns **PASS** with a quality score',
+              '   of **8.5 or higher**.',
+              '5. Generate the necessary code or configuration changes to resolve the issue.',
+              '6. Open a pull request with the proposed fix, including a clear description of',
+              '   the root cause, the solution, and any references to official Microsoft',
+              '   documentation.',
+            ].join('\n');
+
+            const { data: issue } = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              title: `[Synapse Fix] Pipeline failure: ${errorMessage.slice(0, 80)}`,
+              body,
+              labels: ['synapse-error', 'copilot'],
+              assignees: ['copilot'],
+            });
+
+            core.notice(`Created issue #${issue.number}: ${issue.html_url}`);
+            core.setOutput('issue_number', issue.number);
+            core.setOutput('issue_url',    issue.html_url);
+        env:
+          ERROR_MESSAGE:  ${{ steps.payload.outputs.error_message }}
+          PIPELINE_NAME:  ${{ steps.payload.outputs.pipeline_name }}
+          ACTIVITY_NAME:  ${{ steps.payload.outputs.activity_name }}
+          TRIGGER_NAME:   ${{ steps.payload.outputs.trigger_name }}
+          WORKSPACE_NAME: ${{ steps.payload.outputs.workspace_name }}
+          RECENT_CHANGES: ${{ steps.payload.outputs.recent_changes }}
